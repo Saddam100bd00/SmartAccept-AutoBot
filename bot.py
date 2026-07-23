@@ -13,7 +13,7 @@ from telegram.ext import (
 from keep_alive import keep_alive
 
 # --- কনফিগারেশন ---
-BOT_TOKEN = "8690240616:AAHKOqszJs7aGjSl2kvCnrGczxf6JYh__AQ"
+BOT_TOKEN = "8690240616:AAFzk942XkVODDA9EYtY1eDaIrs5B9XjNX4"
 MAIN_CHANNEL_LINK = "https://t.me/+GOw-gR6YlixiOTE9"
 
 ADMIN_USERNAME = "saddamadmin"
