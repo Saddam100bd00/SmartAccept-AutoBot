@@ -18,7 +18,7 @@ BOT_TOKEN = "8690240616:AAFzk942XkVODDA9EYtY1eDaIrs5B9XjNX4"
 MAIN_CHANNEL_LINK = "https://t.me/+GOw-gR6YlixiOTE9"  # জয়েন করার লিংক
 
 # ⚠️ এখানে আপনার মেইন চ্যানেলের আসল ID বসান (শুরুতে -100 থাকতে হবে)
-MAIN_CHANNEL_ID = "-1002013838202" 
+MAIN_CHANNEL_ID = "-1004301389904" 
 
 ADMIN_USERNAME = "saddamadmin"
 ADMIN_PASSWORD = "saddamadmin1234"
