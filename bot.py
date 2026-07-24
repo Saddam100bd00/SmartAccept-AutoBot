@@ -15,9 +15,10 @@ from keep_alive import keep_alive
 
 # --- কনফিগারেশন ---
 BOT_TOKEN = "8690240616:AAFzk942XkVODDA9EYtY1eDaIrs5B9XjNX4"
-MAIN_CHANNEL_LINK = "https://t.me/+GOw-gR6YlixiOTE9"  # জয়েন করার লিংক
+MAIN_CHANNEL_LINK = "https://t.me/+GOw-gR6YlixiOTE9"  
+SUPPORT_CHANNEL_LINK = "https://t.me/Grp_Sale_999"  # সাপোর্ট লিংক যুক্ত করা হলো
 
-# ⚠️ এখানে আপনার মেইন চ্যানেলের আসল ID বসান (শুরুতে -100 থাকতে হবে)
+# ⚠️ এখানে আপনার মেইন চ্যানেলের আসল ID বসান
 MAIN_CHANNEL_ID = "-1004301389904" 
 
 ADMIN_USERNAME = "saddamadmin"
@@ -72,6 +73,8 @@ for lang in ['ar', 'hi', 'es', 'ru']:
     TEXTS[lang] = TEXTS['en'].copy()
 TEXTS['hi']['lang_msg'] = "✅ <b>भाषा सफलतापूर्वक बदल दी गई है!</b>"
 TEXTS['ar']['lang_msg'] = "✅ <b>تم تغيير اللغة بنجاح!</b>"
+TEXTS['es']['lang_msg'] = "✅ <b>¡Idioma cambiado a Español!</b>"
+TEXTS['ru']['lang_msg'] = "✅ <b>Язык изменен на русский!</b>"
 
 def get_t(user_id, key):
     with sqlite3.connect(DB_NAME) as conn:
@@ -94,7 +97,6 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, msg_id INTEGER, from_chat_id INTEGER, 
             target_type TEXT, target_id INTEGER, interval_hours INTEGER, last_sent INTEGER DEFAULT 0
         )''')
-        # Config table for dynamic texts
         conn.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, text_value TEXT)")
         conn.execute("INSERT OR IGNORE INTO config (key, text_value) VALUES ('guide_text', '📌 Please follow the rules...')")
         conn.execute("INSERT OR IGNORE INTO config (key, text_value) VALUES ('how_to_use', '💡 Add this bot as an Admin in your channel with Add Member permission.')")
@@ -106,13 +108,18 @@ init_db()
 
 # --- Helpers ---
 def save_user(user_id, first_name):
-    with sqlite3.connect(DB_NAME) as conn: conn.execute("INSERT OR IGNORE INTO bot_users (user_id, first_name) VALUES (?, ?)", (user_id, first_name))
+    with sqlite3.connect(DB_NAME) as conn: 
+        conn.execute("INSERT OR IGNORE INTO bot_users (user_id, first_name) VALUES (?, ?)", (user_id, first_name))
+        conn.commit()
 
 def get_config(key):
-    with sqlite3.connect(DB_NAME) as conn: return conn.execute("SELECT text_value FROM config WHERE key = ?", (key,)).fetchone()[0]
+    with sqlite3.connect(DB_NAME) as conn: 
+        return conn.execute("SELECT text_value FROM config WHERE key = ?", (key,)).fetchone()[0]
 
 def set_config(key, val):
-    with sqlite3.connect(DB_NAME) as conn: conn.execute("UPDATE config SET text_value = ? WHERE key = ?", (val, key))
+    with sqlite3.connect(DB_NAME) as conn: 
+        conn.execute("UPDATE config SET text_value = ? WHERE key = ?", (val, key))
+        conn.commit()
 
 # --- অটো-পোস্ট ব্যাকগ্রাউন্ড জব ---
 async def check_auto_posts(context: ContextTypes.DEFAULT_TYPE):
@@ -136,14 +143,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(user.id, user.first_name)
     context.user_data['state'] = None
 
-    # Check Force Sub
     try:
         member = await context.bot.get_chat_member(MAIN_CHANNEL_ID, user.id)
         if member.status in ['left', 'kicked']:
             raise BadRequest("Not joined")
-        await show_main_menu(update, context) # If joined, show menu
+        await show_main_menu(update, context) 
     except Exception as e:
-        # If not joined or bot is not admin in main channel
         txt = get_t(user.id, 'verify_req')
         kb = [
             [InlineKeyboardButton(get_t(user.id, 'btn_robot'), url=MAIN_CHANNEL_LINK)],
@@ -152,19 +157,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message: await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
         else: await update.callback_query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
 
-async def show_main_menu(update_or_cb, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update_or_cb.from_user.id if hasattr(update_or_cb, 'from_user') else update_or_cb.effective_user.id
-    name = update_or_cb.from_user.first_name if hasattr(update_or_cb, 'from_user') else update_or_cb.effective_user.first_name
+async def show_main_menu(obj, context: ContextTypes.DEFAULT_TYPE):
+    user_id = obj.from_user.id
+    name = obj.from_user.first_name
     txt = get_t(user_id, 'welcome_main').format(name=name)
     kb = [
         [InlineKeyboardButton(get_t(user_id, 'btn_all_menu'), callback_data="menu_all"), InlineKeyboardButton(get_t(user_id, 'btn_how_use'), callback_data="menu_how")],
         [InlineKeyboardButton(get_t(user_id, 'btn_lang'), callback_data="change_lang"), InlineKeyboardButton(get_t(user_id, 'btn_on_my_ch'), callback_data="user_channels")]
     ]
     markup = InlineKeyboardMarkup(kb)
-    if hasattr(update_or_cb, 'message') and update_or_cb.message:
-        await update_or_cb.message.reply_text(txt, reply_markup=markup, parse_mode=ParseMode.HTML)
+    
+    if hasattr(obj, 'edit_message_text'):
+        await obj.edit_message_text(txt, reply_markup=markup, parse_mode=ParseMode.HTML)
     else:
-        await update_or_cb.edit_message_text(txt, reply_markup=markup, parse_mode=ParseMode.HTML)
+        await obj.message.reply_text(txt, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 # --- এডমিন প্যানেল ---
 async def saddamadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -273,6 +279,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with sqlite3.connect(DB_NAME) as conn:
                 conn.execute("INSERT INTO auto_posts (msg_id, from_chat_id, target_type, target_id, interval_hours) VALUES (?, ?, ?, ?, ?)", 
                              (context.user_data['ap_msg_id'], context.user_data['ap_from'], context.user_data['ap_type'], context.user_data.get('ap_target_id', 0), int(text)))
+                conn.commit()
             await update.message.reply_text(f"✅ সফল! প্রতি {text} ঘন্টা পরপর পোস্ট হবে।")
             await show_admin_panel(update.message, context)
         else: await update.message.reply_text("❌ সংখ্যা লিখুন (যেমন: 12)")
@@ -285,7 +292,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # User States
     elif state and state.startswith("WAITING_WELCOME_"):
         chat_id = int(state.split("_")[2])
-        with sqlite3.connect(DB_NAME) as conn: conn.execute("UPDATE channels SET welcome_msg = ? WHERE chat_id = ?", (text, chat_id))
+        with sqlite3.connect(DB_NAME) as conn: 
+            conn.execute("UPDATE channels SET welcome_msg = ? WHERE chat_id = ?", (text, chat_id))
+            conn.commit()
         context.user_data['state'] = None
         await update.message.reply_text("✅ <b>ওয়েলকাম মেসেজ সেভ হয়েছে!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"manage_{chat_id}")]]), parse_mode=ParseMode.HTML)
 
@@ -361,7 +370,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("lng_"):
         lang = data.split("_")[1]
-        with sqlite3.connect(DB_NAME) as conn: conn.execute("UPDATE bot_users SET lang = ? WHERE user_id = ?", (lang, user_id))
+        with sqlite3.connect(DB_NAME) as conn: 
+            conn.execute("UPDATE bot_users SET lang = ? WHERE user_id = ?", (lang, user_id))
+            conn.commit()
         await query.answer(get_t(user_id, 'lang_msg'), show_alert=True)
         await show_main_menu(query, context)
 
@@ -406,6 +417,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with sqlite3.connect(DB_NAME) as conn:
             val = 0 if conn.execute("SELECT auto_accept FROM channels WHERE chat_id=?", (chat_id,)).fetchone()[0] else 1
             conn.execute("UPDATE channels SET auto_accept = ? WHERE chat_id = ?", (val, chat_id))
+            conn.commit()
         await button_handler(update, context)
 
     elif data.startswith("set_wel_"):
@@ -421,10 +433,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for uid in pend:
             try:
                 await context.bot.approve_chat_join_request(chat_id=chat_id, user_id=uid)
-                with sqlite3.connect(DB_NAME) as conn: conn.execute("UPDATE stats SET value = value + 1 WHERE key = 'total_accepted'")
+                with sqlite3.connect(DB_NAME) as conn: 
+                    conn.execute("UPDATE stats SET value = value + 1 WHERE key = 'total_accepted'")
+                    conn.commit()
                 await asyncio.sleep(0.1)
             except: pass
-        with sqlite3.connect(DB_NAME) as conn: conn.execute("DELETE FROM pending_requests WHERE chat_id = ?", (chat_id,))
+        with sqlite3.connect(DB_NAME) as conn: 
+            conn.execute("DELETE FROM pending_requests WHERE chat_id = ?", (chat_id,))
+            conn.commit()
         await query.edit_message_text("🎉 <b>সব রিকোয়েস্ট এপ্রুভ হয়েছে!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 ব্যাক", callback_data=f"manage_{chat_id}")]]), parse_mode=ParseMode.HTML)
 
     # Admin Functions
@@ -484,7 +500,9 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     if auto_acc:
         try:
             await context.bot.approve_chat_join_request(chat_id, user_id)
-            with sqlite3.connect(DB_NAME) as conn: conn.execute("UPDATE stats SET value = value + 1 WHERE key = 'total_accepted'")
+            with sqlite3.connect(DB_NAME) as conn: 
+                conn.execute("UPDATE stats SET value = value + 1 WHERE key = 'total_accepted'")
+                conn.commit()
             try:
                 final_msg = msg.replace("{user}", user_name).replace("{channel}", title) if msg else f"হ্যালো <b>{user_name}</b>!\n<b>{title}</b>-এ আপনাকে স্বাগতম!"
                 await context.bot.send_message(user_id, final_msg, parse_mode=ParseMode.HTML)
@@ -494,7 +512,9 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         try: await context.bot.decline_chat_join_request(chat_id, user_id)
         except: pass
     else:
-        with sqlite3.connect(DB_NAME) as conn: conn.execute("INSERT OR IGNORE INTO pending_requests (chat_id, user_id) VALUES (?, ?)", (chat_id, user_id))
+        with sqlite3.connect(DB_NAME) as conn: 
+            conn.execute("INSERT OR IGNORE INTO pending_requests (chat_id, user_id) VALUES (?, ?)", (chat_id, user_id))
+            conn.commit()
 
 # --- চ্যানেল ট্র্যাকার ---
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -502,6 +522,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if res.new_chat_member.status in ["administrator", "member"]:
         with sqlite3.connect(DB_NAME) as conn: 
             conn.execute('''INSERT INTO channels (chat_id, chat_title, owner_id) VALUES (?, ?, ?) ON CONFLICT(chat_id) DO UPDATE SET chat_title=?, owner_id=?''', (res.chat.id, res.chat.title, res.from_user.id, res.chat.title, res.from_user.id))
+            conn.commit()
         try: await context.bot.send_message(res.from_user.id, f"✅ <b>{res.chat.title}</b> চ্যানেলটি বটের সাথে যুক্ত হয়েছে!\n\n(অটো-একসেপ্ট বাই ডিফল্ট ON করা আছে।)", parse_mode=ParseMode.HTML)
         except: pass
 
