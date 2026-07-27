@@ -70,7 +70,7 @@ TEXTS = {
 def get_t(user_id, key):
     with sqlite3.connect(DB_NAME) as conn:
         row = conn.execute("SELECT lang FROM bot_users WHERE user_id = ?", (user_id,)).fetchone()
-        lang = row[0] if row and row[0] in TEXTS else 'en' # ডিফল্ট English
+        lang = row[0] if row and row[0] in TEXTS else 'en'
     return TEXTS.get(lang, TEXTS['en']).get(key, TEXTS['en'].get(key, ""))
 
 # --- ডাটাবেজ সেটআপ ---
@@ -83,8 +83,16 @@ def init_db():
         conn.execute("CREATE TABLE IF NOT EXISTS pending_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, user_id INTEGER, UNIQUE(chat_id, user_id))")
         conn.execute("CREATE TABLE IF NOT EXISTS bot_users (user_id INTEGER PRIMARY KEY, first_name TEXT, joined_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, lang TEXT DEFAULT 'en')")
         conn.execute("CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0)")
-        conn.execute("INSERT OR IGNORE INTO stats (key, value) VALUES ('total_accepted', 0)")
-        conn.execute("INSERT OR IGNORE INTO stats (key, value) VALUES ('total_messages', 0)")
+        for key in ['total_accepted', 'total_messages']:
+            conn.execute("INSERT OR IGNORE INTO stats (key, value) VALUES (?, 0)", (key,))
+        conn.execute('''CREATE TABLE IF NOT EXISTS auto_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, msg_id INTEGER, from_chat_id INTEGER, 
+            target_type TEXT, target_id INTEGER, interval_hours INTEGER, last_sent INTEGER DEFAULT 0
+        )''')
+        conn.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, text_value TEXT)")
+        conn.execute("INSERT OR IGNORE INTO config (key, text_value) VALUES ('guide_text', '📌 Please add me to your channel as an admin.')")
+        conn.execute("INSERT OR IGNORE INTO config (key, text_value) VALUES ('how_to_use', '💡 Just add this bot as an Admin in your channel.')")
+        conn.execute("INSERT OR IGNORE INTO config (key, text_value) VALUES ('video_link', 'https://youtube.com/')")
         try: conn.execute("ALTER TABLE bot_users ADD COLUMN lang TEXT DEFAULT 'en'")
         except: pass
         conn.commit()
@@ -93,7 +101,29 @@ init_db()
 def save_user(user_id, first_name):
     with sqlite3.connect(DB_NAME) as conn: conn.execute("INSERT OR IGNORE INTO bot_users (user_id, first_name) VALUES (?, ?)", (user_id, first_name))
 
-# --- স্টার্ট ফাংশন (New Layout) ---
+def get_config(key):
+    with sqlite3.connect(DB_NAME) as conn: return conn.execute("SELECT text_value FROM config WHERE key = ?", (key,)).fetchone()[0]
+
+def set_config(key, val):
+    with sqlite3.connect(DB_NAME) as conn: conn.execute("UPDATE config SET text_value = ? WHERE key = ?", (val, key))
+
+# --- অটো-পোস্ট ব্যাকগ্রাউন্ড জব ---
+async def check_auto_posts(context: ContextTypes.DEFAULT_TYPE):
+    now = int(time.time())
+    with sqlite3.connect(DB_NAME) as conn:
+        posts = conn.execute("SELECT id, msg_id, from_chat_id, target_type, target_id, interval_hours, last_sent FROM auto_posts").fetchall()
+        for p in posts:
+            p_id, msg_id, from_chat, target_type, target_id, interval, last_sent = p
+            if now - last_sent >= (interval * 3600):
+                targets = [c[0] for c in conn.execute("SELECT chat_id FROM channels").fetchall()] if target_type == "all_ch" else \
+                          [u[0] for u in conn.execute("SELECT user_id FROM bot_users").fetchall()] if target_type == "all_us" else [target_id]
+                for t_id in targets:
+                    try: await context.bot.copy_message(chat_id=t_id, from_chat_id=from_chat, message_id=msg_id)
+                    except: pass
+                conn.execute("UPDATE auto_posts SET last_sent = ? WHERE id = ?", (now, p_id))
+        conn.commit()
+
+# --- স্টার্ট ফাংশন ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     save_user(user.id, user.first_name)
@@ -110,10 +140,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(get_t(user.id, 'btn_settings'), callback_data="settings_menu")]
     ]
 
+    # 👑 শুধুমাত্র আপনার (Admin) জন্য স্পেশাল প্যানেল বাটন
+    if user.id == ADMIN_ID:
+        kb.append([InlineKeyboardButton("👑 Super Admin Dashboard", callback_data="admin_panel")])
+
     if update.message: await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
     else: await update.callback_query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
 
-# --- এডমিন প্যানেল ---
+# --- এডমিন প্যানেল (All features restored & Stats Live) ---
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id == ADMIN_ID:
@@ -142,9 +176,14 @@ async def show_admin_panel(update_or_message, context):
         f"━━━━━━━━━━━━━━━━━━\n"
         f"👇 <i>Select an action:</i>"
     )
+    
+    # আগের সব বাটন ফিরিয়ে আনা হয়েছে
     kb = [
-        [InlineKeyboardButton("📣 User Broadcast", callback_data="admin_bc_usr")],
-        [InlineKeyboardButton("❌ Close", callback_data="admin_close")]
+        [InlineKeyboardButton("📡 Channel Tracker", callback_data="admin_ch_list"), InlineKeyboardButton("⏰ Auto-Post System", callback_data="admin_autopost")],
+        [InlineKeyboardButton("📣 Channel Broadcast", callback_data="admin_bc_ch"), InlineKeyboardButton("👥 User Broadcast", callback_data="admin_bc_usr")],
+        [InlineKeyboardButton("📝 Specific Channel Post", callback_data="admin_post_spec")],
+        [InlineKeyboardButton("✏️ Edit Guidelines", callback_data="edit_guide"), InlineKeyboardButton("✏️ Edit How to Use", callback_data="edit_how")],
+        [InlineKeyboardButton("🎥 Edit Video Link", callback_data="edit_vid"), InlineKeyboardButton("❌ Logout", callback_data="admin_logout")]
     ]
     
     if hasattr(update_or_message, 'reply_text'): 
@@ -154,9 +193,10 @@ async def show_admin_panel(update_or_message, context):
     else: 
         await update_or_message.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
 
-# --- টেক্সট ইনপুট রাউটার ---
+# --- টেক্সট ইনপুট রাউটার (Dynamic State Manager) ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get('state')
+    text = update.message.text
     user_id = update.effective_user.id
     is_admin = (user_id == ADMIN_ID)
     
@@ -165,7 +205,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.execute("UPDATE stats SET value = value + 1 WHERE key = 'total_messages'")
         conn.commit()
 
-    if state == 'WAITING_BC_USR_MSG' and is_admin:
+    if state == 'EDIT_GUIDE' and is_admin:
+        set_config('guide_text', text)
+        await update.message.reply_text("✅ Guidelines updated!")
+        await show_admin_panel(update, context)
+        
+    elif state == 'EDIT_HOW' and is_admin:
+        set_config('how_to_use', text)
+        await update.message.reply_text("✅ How to use updated!")
+        await show_admin_panel(update, context)
+        
+    elif state == 'EDIT_VID' and is_admin:
+        set_config('video_link', text)
+        await update.message.reply_text("✅ Video Link updated!")
+        await show_admin_panel(update, context)
+
+    elif state == 'WAITING_BC_USR_MSG' and is_admin:
         with sqlite3.connect(DB_NAME) as conn: users = [u[0] for u in conn.execute("SELECT user_id FROM bot_users").fetchall()]
         msg = await update.message.reply_text(f"⏳ Sending to {len(users)} users...")
         success = 0
@@ -177,11 +232,56 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
         await msg.edit_text(f"✅ Broadcast Successful! ({success}/{len(users)})")
         await show_admin_panel(update, context)
+
+    elif state == 'WAITING_BC_CH_MSG' and is_admin:
+        with sqlite3.connect(DB_NAME) as conn: channels = [c[0] for c in conn.execute("SELECT chat_id FROM channels").fetchall()]
+        msg = await update.message.reply_text(f"⏳ Sending to {len(channels)} channels...")
+        for ch in channels:
+            try: await context.bot.copy_message(chat_id=ch, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+            except: pass
+        await msg.edit_text("✅ Channel broadcast successful!")
+        await show_admin_panel(update, context)
+
+    elif state == 'WAITING_SPEC_CH_ID' and is_admin:
+        context.user_data['spec_ch_id'] = text
+        context.user_data['state'] = 'WAITING_SPEC_CH_MSG'
+        await update.message.reply_text("✅ Channel ID saved. Now send the message or photo:")
+
+    elif state == 'WAITING_SPEC_CH_MSG' and is_admin:
+        try:
+            await context.bot.copy_message(chat_id=context.user_data['spec_ch_id'], from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+            await update.message.reply_text("✅ Message sent to the specific channel!")
+        except Exception as e: await update.message.reply_text(f"❌ Error: {e}")
+        await show_admin_panel(update, context)
+
+    elif state == 'WAITING_AUTOPOST_MSG' and is_admin:
+        context.user_data['ap_msg_id'] = update.message.message_id
+        context.user_data['ap_from'] = update.effective_chat.id
+        context.user_data['state'] = 'WAITING_AUTOPOST_TARGET'
+        kb = [[InlineKeyboardButton("📢 All Channels", callback_data="ap_all_ch"), InlineKeyboardButton("👥 All Users", callback_data="ap_all_us")],
+              [InlineKeyboardButton("📝 Specific Channel", callback_data="ap_spec_ch")]]
+        await update.message.reply_text("✅ Message saved. Where do you want to auto-post?", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif state == 'WAITING_AUTOPOST_TIME' and is_admin:
+        if text.isdigit():
+            with sqlite3.connect(DB_NAME) as conn:
+                conn.execute("INSERT INTO auto_posts (msg_id, from_chat_id, target_type, target_id, interval_hours) VALUES (?, ?, ?, ?, ?)", 
+                             (context.user_data['ap_msg_id'], context.user_data['ap_from'], context.user_data['ap_type'], context.user_data.get('ap_target_id', 0), int(text)))
+                conn.commit()
+            await update.message.reply_text(f"✅ Success! Auto-post will trigger every {text} hours.")
+            await show_admin_panel(update, context)
+        else: await update.message.reply_text("❌ Please enter a valid number (e.g. 12)")
         
+    elif state == 'WAITING_AUTOPOST_SPEC_ID' and is_admin:
+        context.user_data['ap_target_id'] = text
+        context.user_data['state'] = 'WAITING_AUTOPOST_TIME'
+        await update.message.reply_text("✅ ID saved. Enter interval in hours (e.g. 12):")
+
+    # User States
     elif state and state.startswith("WAITING_WELCOME_"):
         chat_id = int(state.split("_")[2])
         with sqlite3.connect(DB_NAME) as conn: 
-            conn.execute("UPDATE channels SET welcome_msg = ? WHERE chat_id = ?", (update.message.text, chat_id))
+            conn.execute("UPDATE channels SET welcome_msg = ? WHERE chat_id = ?", (text, chat_id))
             conn.commit()
         context.user_data['state'] = None
         await update.message.reply_text("✅ <b>Welcome message saved!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"manage_{chat_id}")]]), parse_mode=ParseMode.HTML)
@@ -225,8 +325,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(get_t(user_id, 'btn_back'), callback_data="settings_menu")]]), parse_mode=ParseMode.HTML)
         
     elif data == "show_guide":
-        txt = get_t(user_id, 'guide_text')
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(get_t(user_id, 'btn_back'), callback_data="settings_menu")]]), parse_mode=ParseMode.HTML)
+        txt = get_config('guide_text')
+        await query.edit_message_text(f"📖 <b>Guidelines:</b>\n\n{txt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(get_t(user_id, 'btn_back'), callback_data="settings_menu")]]), parse_mode=ParseMode.HTML)
 
     elif data == "show_stats":
         with sqlite3.connect(DB_NAME) as conn:
@@ -272,7 +372,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: members_count = await context.bot.get_chat_member_count(chat_id)
         except: members_count = "Unknown"
 
-        # Auto Accept Status Logic
         ac_status = ch[3]
         kb = [
             [InlineKeyboardButton(f"⚡ Approve All Pending ({pend})", callback_data=f"apprv_all_{chat_id}")],
@@ -290,7 +389,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with sqlite3.connect(DB_NAME) as conn:
             conn.execute("UPDATE channels SET auto_accept = 1, auto_reject = 0 WHERE chat_id = ?", (chat_id,))
             conn.commit()
-        # Refresh the current menu
         query.data = f"manage_{chat_id}"
         await button_handler(update, context)
 
@@ -338,15 +436,59 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
         await query.edit_message_text("🎉 <b>All requests approved!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"manage_{chat_id}")]]), parse_mode=ParseMode.HTML)
 
-    # Admin Functions
+    # --- Admin Functions (Restored All Buttons) ---
+    elif data == "admin_panel":
+        await show_admin_panel(update, context)
+
+    elif data == "admin_ch_list":
+        with sqlite3.connect(DB_NAME) as conn: channels = conn.execute("SELECT chat_id, chat_title, owner_id FROM channels").fetchall()
+        txt = f"📡 <b>Total Channels/Groups:</b> {len(channels)}\n\n"
+        for ch in channels:
+            with sqlite3.connect(DB_NAME) as conn: uname = conn.execute("SELECT first_name FROM bot_users WHERE user_id=?", (ch[2],)).fetchone()
+            txt += f"📢 {ch[1]} (<code>{ch[0]}</code>)\n👤 Admin: {uname[0] if uname else 'Unknown'} (<code>{ch[2]}</code>)\n\n"
+        await query.edit_message_text(txt if channels else "No channels found!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_panel")]]), parse_mode=ParseMode.HTML)
+
+    elif data == "admin_post_spec":
+        context.user_data['state'] = 'WAITING_SPEC_CH_ID'
+        await query.edit_message_text("📝 <b>Post to specific channel:</b>\n\nEnter Channel ID (e.g. -100123456):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
+    
+    elif data == "admin_bc_ch":
+        context.user_data['state'] = 'WAITING_BC_CH_MSG'
+        await query.edit_message_text("📣 <b>Broadcast to all channels:</b>\n\nSend message or photo:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
+    
     elif data == "admin_bc_usr":
         context.user_data['state'] = 'WAITING_BC_USR_MSG'
         await query.edit_message_text("👥 <b>User Broadcast:</b>\n\nSend message:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
+    
+    elif data == "admin_autopost":
+        context.user_data['state'] = 'WAITING_AUTOPOST_MSG'
+        await query.edit_message_text("⏰ <b>Auto-Post Setup:</b>\n\nSend the message you want to auto-post:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
 
-    elif data == "admin_close":
+    elif data.startswith("ap_"):
+        context.user_data['ap_type'] = data
+        if data == "ap_spec_ch":
+            context.user_data['state'] = 'WAITING_AUTOPOST_SPEC_ID'
+            await query.edit_message_text("📝 Enter specific channel/group ID:")
+        else:
+            context.user_data['state'] = 'WAITING_AUTOPOST_TIME'
+            await query.edit_message_text("⏰ Enter interval in hours (e.g., 12 or 24)")
+
+    elif data == "edit_guide":
+        context.user_data['state'] = 'EDIT_GUIDE'
+        await query.edit_message_text("✏️ Send new Guidelines message:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
+    
+    elif data == "edit_how":
+        context.user_data['state'] = 'EDIT_HOW'
+        await query.edit_message_text("✏️ Send new How to use message:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
+    
+    elif data == "edit_vid":
+        context.user_data['state'] = 'EDIT_VID'
+        await query.edit_message_text("🎥 Send new YouTube/Video link:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_panel")]]))
+
+    elif data == "admin_logout":
         await query.message.delete()
 
-# --- জয়েন রিকোয়েস্ট লজিক (New Promo Message) ---
+# --- জয়েন রিকোয়েস্ট লজিক ---
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     req = update.chat_join_request
     chat_id, user_id, user_name, title = req.chat.id, req.from_user.id, req.from_user.first_name, req.chat.title
@@ -401,6 +543,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     keep_alive()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.job_queue.run_repeating(check_auto_posts, interval=120)
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("admin", admin_command))  
