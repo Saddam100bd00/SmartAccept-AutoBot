@@ -515,7 +515,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 bot_uname = context.bot.username
                 kb = [
-                    [InlineKeyboardButton("🔞 PREMIUM_GROUP_BUY_BOT", url="https://t.me/AllInOneDL_AIBot")],
+                    [InlineKeyboardButton("🔞 PREMIUM_GROUP_BUY_BOT", url="https://t.me/PREMIUM_GROUP_BUY_BOT")],
                     [InlineKeyboardButton("↗️ Add me to a channel!", url=f"https://t.me/{bot_uname}?startchannel=true&admin=invite_users")],
                     [InlineKeyboardButton("➕ Add me to a group!", url=f"https://t.me/{bot_uname}?startgroup=true&admin=invite_users")]
                 ]
