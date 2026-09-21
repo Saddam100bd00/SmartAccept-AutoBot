@@ -509,13 +509,13 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"🔥 <b>A Special Gift for You:</b>\n"
                     f"Do you want to download videos and music (MP3) from TikTok, Facebook, YouTube, or Instagram without any <i>Watermark</i>?\n\n"
                     f"👇 <i>Use our Premium Downloader Bot for completely free:</i>\n"
-                    f"👉 @AllInOneDL_AIBot"
+                    f"👉 @PREMIUM_GROUP_BUY_BOT"
                 )
                 final_msg = msg.replace("{user}", user_name).replace("{channel}", title) if msg else promo_msg
                 
                 bot_uname = context.bot.username
                 kb = [
-                    [InlineKeyboardButton("📥 Open Video Downloader Bot", url="https://t.me/AllInOneDL_AIBot")],
+                    [InlineKeyboardButton("🔞 PREMIUM_GROUP_BUY_BOT", url="https://t.me/AllInOneDL_AIBot")],
                     [InlineKeyboardButton("↗️ Add me to a channel!", url=f"https://t.me/{bot_uname}?startchannel=true&admin=invite_users")],
                     [InlineKeyboardButton("➕ Add me to a group!", url=f"https://t.me/{bot_uname}?startgroup=true&admin=invite_users")]
                 ]
